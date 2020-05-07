@@ -100,25 +100,61 @@ assign stat_reg[7] = 0; /* parity error */
 assign ctl_prescaler = clk_freq / (baudrate * 8);
 
 // aes_encrypt inputs
-logic [32*4-1:0] aes_key;
-logic aes_load;
+logic [127:0] aes_key;
+logic aes_init;
+logic aes_next;
 logic [127:0] aes_pt;
 
 // aes_encrypt outputs
+logic aes_ready;
 logic [127:0] aes_ct;
 logic aes_valid;
 
-aes_encrypt
+// aes state
+logic key_loading;
+logic pt_loading;
+logic aes_run;
+
+aes_core
 #()
 aes_encrypt_1
-( .clk   (clk)
-, .rst_n (rst)
-, .key   (aes_key)
-, .load  (aes_load)
-, .pt    (aes_pt)
-, .ct    (aes_ct)
-, .valid (aes_valid)
+( .clk     (clk)
+, .reset_n (rst)
+, .encdec  (1) // Encrypt
+, .init    (aes_init)
+, .next    (aes_next)
+, .ready   (aes_ready)
+, .key     ({aes_key, 128'b0})
+, .keylen  (0) // 128-bit key
+, .block   (aes_pt)
+, .result  (aes_ct)
+, .result_valid (aes_valid)
 );
+
+always @ (posedge clk) begin : aes_control
+	if (rst) begin
+		aes_key <= 0;
+		aes_init <= 0;
+		aes_next <= 0;
+		aes_pt <= 0;
+
+		key_loading <= 0;
+		pt_loading <= 0;
+		aes_run <= 0;
+	end else begin
+		aes_init <= key_loading;
+
+		if (pt_loading) begin
+			aes_run <= 0;
+		end
+
+		aes_next <= 0;
+		if (!key_loading && !aes_init && !pt_loading && aes_ready && !aes_run) begin
+			aes_next <= 1;
+			aes_run <= 1;
+		end
+	end
+end
 
 always @ (posedge clk) begin : axi_aw
 	reg enable;
@@ -152,11 +188,6 @@ always @ (posedge clk) begin : axi_w
 		uart_send <= 0;
 		uart_wdata <= 0;
 		ctrl_reg <= 0;
-
-		// aes_encrypt inputs
-		aes_key <= 0;
-		aes_load <= 0;
-		aes_pt <= 0;
 	end else begin
 		uart_send <= 0;
 		if (enable && wvalid) begin
@@ -164,7 +195,8 @@ always @ (posedge clk) begin : axi_w
 			wready_r <= 1;
 		end
 
-		aes_load <= 0;
+		key_loading <= 0;
+		pt_loading <= 0;
 
 		if (wready_r && wvalid) begin
 			wready_r <= 0;
@@ -183,12 +215,12 @@ always @ (posedge clk) begin : axi_w
 
 				end
 				[4:4+15]: begin // Key
-					aes_load <= 1;
 					aes_key[(write_addr - 4) * 8 +: 8] <= wdata[7:0];
+					key_loading <= 1;
 				end
 				[20:20+15]: begin // PT
-					aes_load <= 1;
 					aes_pt[(write_addr - 20) * 8 +: 8] <= wdata[7:0];
+					pt_loading <= 1;
 				end
 				36: begin // Valid
 				end
