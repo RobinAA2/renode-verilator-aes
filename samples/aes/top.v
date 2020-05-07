@@ -68,8 +68,8 @@ reg arready_r;
 reg rvalid_r;
 reg [31:0] rdata_r;
 
-reg [1:0] write_addr;
-reg [1:0] read_addr;
+reg [31:0] write_addr;
+reg [31:0] read_addr;
 
 reg [7:0] uart_rdata_r;
 
@@ -99,6 +99,27 @@ assign stat_reg[7] = 0; /* parity error */
 
 assign ctl_prescaler = clk_freq / (baudrate * 8);
 
+// aes_encrypt inputs
+logic [32*4-1:0] aes_key;
+logic aes_load;
+logic [127:0] aes_pt;
+
+// aes_encrypt outputs
+logic [127:0] aes_ct;
+logic aes_valid;
+
+aes_encrypt
+#()
+aes_encrypt_1
+( .clk   (clk)
+, .rst_n (rst)
+, .key   (aes_key)
+, .load  (aes_load)
+, .pt    (aes_pt)
+, .ct    (aes_ct)
+, .valid (aes_valid)
+);
+
 always @ (posedge clk) begin : axi_aw
 	reg enable;
 	if (rst) begin
@@ -113,7 +134,7 @@ always @ (posedge clk) begin : axi_aw
 
 		if (awready_r && awvalid) begin
 			awready_r <= 0;
-			write_addr <= awaddr[3:2];
+			write_addr <= awaddr >> 2;
 		end
 
 		if (bvalid_r && bready) begin
@@ -131,6 +152,11 @@ always @ (posedge clk) begin : axi_w
 		uart_send <= 0;
 		uart_wdata <= 0;
 		ctrl_reg <= 0;
+
+		// aes_encrypt inputs
+		aes_key <= 0;
+		aes_load <= 0;
+		aes_pt <= 0;
 	end else begin
 		uart_send <= 0;
 		if (enable && wvalid) begin
@@ -138,9 +164,11 @@ always @ (posedge clk) begin : axi_w
 			wready_r <= 1;
 		end
 
+		aes_load <= 0;
+
 		if (wready_r && wvalid) begin
 			wready_r <= 0;
-			case (write_addr)
+			case (write_addr) inside
 				0: begin
 
 				end
@@ -153,6 +181,20 @@ always @ (posedge clk) begin : axi_w
 				end
 				3: begin
 
+				end
+				[4:4+15]: begin // Key
+					aes_load <= 1;
+					aes_key[(write_addr - 4) * 8 +: 8] <= wdata[7:0];
+				end
+				[20:20+15]: begin // PT
+					aes_load <= 1;
+					aes_pt[(write_addr - 20) * 8 +: 8] <= wdata[7:0];
+				end
+				36: begin // Valid
+				end
+				[37:37+15]: begin // CT
+				end
+				default: begin
 				end
 			endcase
 		end
@@ -195,7 +237,7 @@ always @ (posedge clk) begin : axi_ar
 
 		if (arready_r && arvalid) begin
 			arready_r <= 0;
-			read_addr <= araddr[3:2];
+			read_addr <= araddr >> 2;
 		end
 
 		if (rvalid_r && rready) begin
@@ -216,7 +258,7 @@ always @ (posedge clk) begin : axi_r
 		if (enable && rready) begin
 			enable <= 0;
 			rvalid_r <= 1;
-			case (read_addr)
+			case (read_addr) inside
 				0: begin
 					uart_read <= 1;
 					rdata_r[7:0] <= uart_rdata_r;
@@ -230,6 +272,24 @@ always @ (posedge clk) begin : axi_r
 				3: begin
 					rdata_r[7:0] <= stat_reg;
 				end
+				[4:4+15]: begin // Key
+					rdata_r <= 0;
+				end
+				[20:20+15]: begin // PT
+					rdata_r <= 0;
+				end
+				36: begin // Valid
+					rdata_r <= 0;
+					rdata_r[0] <= aes_valid;
+				end
+				[37:37+15]: begin // CT
+					rdata_r <= 0;
+					rdata_r[7:0] <= aes_ct[(read_addr - 37) * 8 +: 8];
+				end
+				default: begin
+					rdata_r <= 0;
+				end
+
 			endcase
 		end
 

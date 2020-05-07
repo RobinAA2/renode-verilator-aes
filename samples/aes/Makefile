@@ -11,7 +11,7 @@ endif
 default:
 	@echo "-- Verilator - Renode integration - UARTLite example"
 	@echo "-- VERILATE ----------------"
-	$(VERILATOR) -cc top.v --exe -CFLAGS "-Wpedantic -Wall -I$(INTEGRATION_DIR)" sim_main.cpp $(INTEGRATION_DIR)/src/renode.cpp $(INTEGRATION_DIR)/src/buses/axilite.cpp $(INTEGRATION_DIR)/src/peripherals/uart.cpp
+	$(VERILATOR) -Wno-fatal -cc --top-module top top.v aes/hdl/*.sv -Iaes/include --exe -CFLAGS "-Wpedantic -Wall -I$(INTEGRATION_DIR)" sim_main.cpp $(INTEGRATION_DIR)/src/renode.cpp $(INTEGRATION_DIR)/src/buses/axilite.cpp $(INTEGRATION_DIR)/src/peripherals/uart.cpp
 	@echo "-- COMPILE -----------------"
 	LDLIBS="-lzmq -lpthread" $(MAKE) -j 4 -C obj_dir -f Vtop.mk
 	@echo "The output file is \`obj_dir/Vtop\`."
